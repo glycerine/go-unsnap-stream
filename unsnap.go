@@ -289,10 +289,10 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 
 // for whole file at once:
 //
-// receive on stdin a stream of bytes in the snappy-streaming framed
+// receive on stdin (now the io.Reader, r) a stream of bytes in the snappy-streaming framed
 //  format, defined here: http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt
 // Grab each frame, run it through the snappy decoder, and spit out
-//  each frame all joined back-to-back on stdout.
+//  each frame all joined back-to-back on stdout (now on the io.Writer, w).
 //
 func Unsnappy(r io.Reader, w io.Writer) (err error) {
 	b, err := ioutil.ReadAll(r)
