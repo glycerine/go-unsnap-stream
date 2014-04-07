@@ -55,8 +55,8 @@ import (
 type SnappyFile struct {
 	Fname  string
 	Filep  *os.File
-	EncBuf bytes.Buffer // holds any extra that isn't yet returned, encoded
-	DecBuf bytes.Buffer // holds any extra that isn't yet returned, decoded
+	EncBuf FixedSizeRingBuf // holds any extra that isn't yet returned, encoded
+	DecBuf FixedSizeRingBuf // holds any extra that isn't yet returned, decoded
 }
 
 var total int
@@ -68,14 +68,21 @@ func (f *SnappyFile) Dump() {
 }
 
 func (f *SnappyFile) Read(p []byte) (n int, err error) {
+
+	// before we unencrypt more, try to drain the DecBuf first
+	n, _ = f.DecBuf.Read(p)
+	if n > 0 {
+		total += n
+		return n, nil
+	}
+
 	//nEncRead, nDecAdded, err := UnsnapOneFrame(f.Filep, &f.EncBuf, &f.DecBuf, f.Fname)
 	_, _, err = UnsnapOneFrame(f.Filep, &f.EncBuf, &f.DecBuf, f.Fname)
 	if err != nil && err != io.EOF {
 		panic(err)
 	}
-	bslice := f.DecBuf.Bytes()
-	n = copy(p, bslice)
-	f.DecBuf.Next(n) // drains DecBuf by n bytes
+
+	n, _ = f.DecBuf.Read(p)
 
 	if n > 0 {
 		total += n
@@ -99,8 +106,8 @@ func Open(name string) (file *SnappyFile, err error) {
 	snap := &SnappyFile{
 		Fname:  name,
 		Filep:  fp,
-		EncBuf: *new(bytes.Buffer), // buffer of snappy encoded bytes
-		DecBuf: *new(bytes.Buffer), // buffer of snapppy decoded bytes
+		EncBuf: *NewFixedSizeRingBuf(65536),     // buffer of snappy encoded bytes
+		DecBuf: *NewFixedSizeRingBuf(65536 * 2), // buffer of snapppy decoded bytes
 	}
 	return snap, nil
 }
@@ -112,11 +119,7 @@ func (f *SnappyFile) Close() error {
 // for an increment of a frame at a time:
 // read from r into encBuf (encBuf is still encoded, thus the name), and write unsnappified frames into outDecodedBuf
 //  the returned n: number of bytes read from the encrypted encBuf
-func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buffer, fname string) (nEnc int64, nDec int64, err error) {
-	//	b, err := ioutil.ReadAll(r)
-	//	if err != nil {
-	//		panic(err)
-	//	}
+func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedSizeRingBuf, fname string) (nEnc int64, nDec int64, err error) {
 
 	nEnc = 0
 	nDec = 0
@@ -127,7 +130,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 	if err != nil {
 		if err == io.EOF {
 			if nread == 0 {
-				if len(encBuf.Bytes()) == 0 {
+				if encBuf.Readable == 0 {
 					return nEnc, nDec, io.EOF
 				}
 				// else we have bytes in encBuf, so decode them!
@@ -188,7 +191,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 					//fmt.Printf("got streaming snappy magic header just fine.\n")
 				}
 				chunk = chunk[snappyStreamHeaderSz:]
-				(*encBuf).Next(snappyStreamHeaderSz)
+				(*encBuf).Advance(snappyStreamHeaderSz)
 				nEnc += snappyStreamHeaderSz
 				continue
 			}
@@ -212,11 +215,9 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 					// get back to caller with what we've got so far
 					return nEnc, nDec, nil
 				}
-				//	fmt.Printf("ok, b is %#v , %#v\n", ok, dec)
 
-				// spit out decoded text
-				// n, err := w.Write(dec)
-				n, err := io.Copy(outDecodedBuf, bytes.NewBuffer(dec))
+				bnb := bytes.NewBuffer(dec)
+				n, err := io.Copy(outDecodedBuf, bnb)
 				if err != nil {
 					panic(err)
 				}
@@ -239,7 +240,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 				// move to next header
 				inc := (headerSz + int(chunksz))
 				chunk = chunk[inc:]
-				(*encBuf).Next(inc)
+				(*encBuf).Advance(inc)
 				nEnc += int64(inc)
 				continue
 			}
@@ -261,7 +262,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 
 				inc := (headerSz + int(chunksz))
 				chunk = chunk[inc:]
-				(*encBuf).Next(inc)
+				(*encBuf).Advance(inc)
 				nEnc += int64(inc)
 				continue
 			}
@@ -273,7 +274,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *bytes.Buffer, outDecodedBuf *bytes.Buff
 				inc := (headerSz + int(chunksz))
 				chunk = chunk[inc:]
 				nEnc += int64(inc)
-				(*encBuf).Next(inc)
+				(*encBuf).Advance(inc)
 				continue
 			}
 
