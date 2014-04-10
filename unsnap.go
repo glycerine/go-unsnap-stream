@@ -1,43 +1,5 @@
 package unsnap
 
-// copyright (c) 2013-2014, Jason E. Aten.
-// License: MIT.
-
-// For reference, includes code at the bottom of the file from the python
-// implementation of decoding the snappy framing format. See file:
-// .../anaconda/install/lib/python2.7/site-packages/snappy.py
-// The python code is copyright and licensed as:
-/*
-#
-# Copyright (c) 2011, Andres Moreira <andres@andresmoreira.com>
-#               2011, Felipe Cruz <felipecruz@loogica.net>
-#               2012, JT Olds <jt@spacemonkey.com>
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in the
-#       documentation and/or other materials provided with the distribution.
-#     * Neither the name of the authors nor the
-#       names of its contributors may be used to endorse or promote products
-#       derived from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL ANDRES MOREIRA BE LIABLE FOR ANY DIRECT,
-# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-*/
-
 import (
 	"bytes"
 	"encoding/binary"
@@ -47,16 +9,31 @@ import (
 	"os"
 
 	"hash/crc32"
-	"code.google.com/p/snappy-go/snappy"
+
+	// use the C wrapper instead of "code.google.com/p/snappy-go/snappy"
+	snappy "github.com/dgryski/go-csnappy"
 )
 
 // SnappyFile: create a drop-in-replacement/wrapper for an *os.File that handles doing the unsnappification online as more is read from it
 
 type SnappyFile struct {
-	Fname  string
-	Filep  *os.File
+	Fname string
+	Filep *os.File
+
+	// allow clients to substitute us for an os.File and just switch
+	// off compression if they don't want it.
+	SnappyEncodeDecodeOff bool // if true, we bypass straight to Filep
+
 	EncBuf FixedSizeRingBuf // holds any extra that isn't yet returned, encoded
 	DecBuf FixedSizeRingBuf // holds any extra that isn't yet returned, decoded
+
+	// for writing to stream-framed snappy
+	HeaderChunkWritten bool
+
+	// Sanity check: ee can only read, or only write, to one SnappyFile.
+	// EncBuf and DecBuf are used differently in each mode. Verify
+	// that we are consistent with this flag.
+	Writing bool
 }
 
 var total int
@@ -68,6 +45,14 @@ func (f *SnappyFile) Dump() {
 }
 
 func (f *SnappyFile) Read(p []byte) (n int, err error) {
+
+	if f.SnappyEncodeDecodeOff {
+		return f.Filep.Read(p)
+	}
+
+	if f.Writing {
+		panic("Reading on a write-only SnappyFile")
+	}
 
 	// before we unencrypt more, try to drain the DecBuf first
 	n, _ = f.DecBuf.Read(p)
@@ -88,8 +73,8 @@ func (f *SnappyFile) Read(p []byte) (n int, err error) {
 		total += n
 		return n, nil
 	}
-	if len(f.DecBuf.Bytes()) == 0 {
-		if len(f.DecBuf.Bytes()) == 0 && len(f.EncBuf.Bytes()) == 0 {
+	if f.DecBuf.Readable == 0 {
+		if f.DecBuf.Readable == 0 && f.EncBuf.Readable == 0 {
 			// only now (when EncBuf is empty) can we give io.EOF.
 			// Any earlier, and we leave stuff un-decoded!
 			return 0, io.EOF
@@ -103,11 +88,30 @@ func Open(name string) (file *SnappyFile, err error) {
 	if err != nil {
 		return nil, err
 	}
+	// encoding in snappy can apparently go beyond the original size, so
+	// we make our buffers big enough, 2*max snappy chunk => 2 * CHUNK_MAX(65536)
+
 	snap := &SnappyFile{
-		Fname:  name,
-		Filep:  fp,
-		EncBuf: *NewFixedSizeRingBuf(65536),     // buffer of snappy encoded bytes
-		DecBuf: *NewFixedSizeRingBuf(65536 * 2), // buffer of snapppy decoded bytes
+		Fname:   name,
+		Filep:   fp,
+		EncBuf:  *NewFixedSizeRingBuf(CHUNK_MAX * 2), // buffer of snappy encoded bytes
+		DecBuf:  *NewFixedSizeRingBuf(CHUNK_MAX * 2), // buffer of snapppy decoded bytes
+		Writing: false,
+	}
+	return snap, nil
+}
+
+func Create(name string) (file *SnappyFile, err error) {
+	fp, err := os.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	snap := &SnappyFile{
+		Fname:   name,
+		Filep:   fp,
+		EncBuf:  *NewFixedSizeRingBuf(65536),     // on writing: temp for testing compression
+		DecBuf:  *NewFixedSizeRingBuf(65536 * 2), // on writing: final buffer of snappy framed and encoded bytes
+		Writing: true,
 	}
 	return snap, nil
 }
@@ -116,10 +120,18 @@ func (f *SnappyFile) Close() error {
 	return f.Filep.Close()
 }
 
+func (f *SnappyFile) Sync() error {
+	return f.Filep.Sync()
+}
+
 // for an increment of a frame at a time:
 // read from r into encBuf (encBuf is still encoded, thus the name), and write unsnappified frames into outDecodedBuf
 //  the returned n: number of bytes read from the encrypted encBuf
 func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedSizeRingBuf, fname string) (nEnc int64, nDec int64, err error) {
+	//	b, err := ioutil.ReadAll(r)
+	//	if err != nil {
+	//		panic(err)
+	//	}
 
 	nEnc = 0
 	nDec = 0
@@ -201,7 +213,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 					fmt.Fprintf(os.Stderr, "chunksz is %d  while  total bytes avail are: %d\n", int(chunksz), len(chunk)-4)
 				}
 
-				//crc := binary.LittleEndian.Uint32(chunk[headerSz:(headerSz + crc32Sz)])
+				crc := binary.LittleEndian.Uint32(chunk[headerSz:(headerSz + crc32Sz)])
 				section := chunk[(headerSz + crc32Sz):(headerSz + chunksz)]
 
 				dec, ok := snappy.Decode(nil, section)
@@ -215,10 +227,15 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 					// get back to caller with what we've got so far
 					return nEnc, nDec, nil
 				}
+				//	fmt.Printf("ok, b is %#v , %#v\n", ok, dec)
 
+				// spit out decoded text
+				// n, err := w.Write(dec)
+				//fmt.Printf("len(dec) = %d,   outDecodedBuf.Readable=%d\n", len(dec), outDecodedBuf.Readable)
 				bnb := bytes.NewBuffer(dec)
 				n, err := io.Copy(outDecodedBuf, bnb)
 				if err != nil {
+					//fmt.Printf("got n=%d, err= %s ; when trying to io.Copy(outDecodedBuf: N=%d, Readable=%d)\n", n, err, outDecodedBuf.N, outDecodedBuf.Readable)
 					panic(err)
 				}
 				if n != int64(len(dec)) {
@@ -227,16 +244,16 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 				nDec += n
 
 				// verify the crc32 rotated checksum
-				//  couldn't actually get this to match what we expected, even though it
+				//  couldn't actually get this to match what we expected, because I wasn't checking the *decoded and uncompressed* version.
 				//  should be using the intel hardware and so be very fast.
-				/*
-					m32 := masked_crc32c(section)
-					if m32 != crc {
-						panic(fmt.Sprintf("crc32 masked failiure. expected: %v but got: %v", crc, m32))
-					} else {
-						fmt.Printf("\nchecksums match: %v == %v\n", crc, m32)
-					}
-				*/
+
+				m32 := masked_crc32c(dec)
+				if m32 != crc {
+					panic(fmt.Sprintf("crc32 masked failiure. expected: %v but got: %v", crc, m32))
+				} else {
+					//fmt.Printf("\nchecksums match: %v == %v\n", crc, m32)
+				}
+
 				// move to next header
 				inc := (headerSz + int(chunksz))
 				chunk = chunk[inc:]
@@ -250,7 +267,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 				//n, err := w.Write(chunk[(headerSz+crc32Sz):(headerSz + int(chunksz))])
 				n, err := io.Copy(outDecodedBuf, bytes.NewBuffer(chunk[(headerSz+crc32Sz):(headerSz+int(chunksz))]))
 				if verbose {
-					fmt.Printf("debug: n=%d  err=%v  chunksz=%d  outDecodedBuf='%v'\n", n, err, chunksz, outDecodedBuf)
+					//fmt.Printf("debug: n=%d  err=%v  chunksz=%d  outDecodedBuf='%v'\n", n, err, chunksz, outDecodedBuf)
 				}
 				if err != nil {
 					panic(err)
@@ -270,7 +287,7 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 			fallthrough // padding, just skip it
 		case chunk_type >= 0x80 && chunk_type <= 0xfd:
 			{ //  Reserved skippable chunks
-				fmt.Printf("\nin reserved skippable chunks, at nEnc=%v\n", nEnc)
+				//fmt.Printf("\nin reserved skippable chunks, at nEnc=%v\n", nEnc)
 				inc := (headerSz + int(chunksz))
 				chunk = chunk[inc:]
 				nEnc += int64(inc)
@@ -290,10 +307,10 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 
 // for whole file at once:
 //
-// receive on stdin (now the io.Reader, r) a stream of bytes in the snappy-streaming framed
+// receive on stdin a stream of bytes in the snappy-streaming framed
 //  format, defined here: http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt
 // Grab each frame, run it through the snappy decoder, and spit out
-//  each frame all joined back-to-back on stdout (now on the io.Writer, w).
+//  each frame all joined back-to-back on stdout.
 //
 func Unsnappy(r io.Reader, w io.Writer) (err error) {
 	b, err := ioutil.ReadAll(r)
@@ -411,10 +428,12 @@ func Unsnappy(r io.Reader, w io.Writer) (err error) {
 	return nil
 }
 
-// python's implementation, for reference:
+// python's implementation, for reference.
 
-const _CHUNK_MAX = 65536
-const _STREAM_TO_STREAM_BLOCK_SIZE = _CHUNK_MAX
+var SnappyStreamHeaderMagic = []byte{0xff, 0x06, 0x00, 0x00, 0x73, 0x4e, 0x61, 0x50, 0x70, 0x59}
+
+const CHUNK_MAX = 65536
+const _STREAM_TO_STREAM_BLOCK_SIZE = CHUNK_MAX
 const _STREAM_IDENTIFIER = `sNaPpY`
 const _COMPRESSED_CHUNK = 0x00
 const _UNCOMPRESSED_CHUNK = 0x01
@@ -436,9 +455,9 @@ func init() {
 
 func masked_crc32c(data []byte) uint32 {
 
-	// see the framing format specification
+	// see the framing format specification, http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt
 	var crc uint32 = crc32.Checksum(data, crctab)
-	return (((crc >> 15) | (crc << 17)) + 0xa282ead8)
+	return (uint32((crc>>15)|(crc<<17)) + 0xa282ead8)
 }
 
 /*
@@ -535,3 +554,22 @@ func Decompress(obuf *bytes.Buffer, data []byte, header_found bool) []byte {
 	} // end for
 }
 */
+
+func ReadSnappyStreamCompressedFile(filename string) ([]byte, error) {
+
+	snappyFile, err := Open(filename)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	var bb bytes.Buffer
+	_, err = bb.ReadFrom(snappyFile)
+	if err == io.EOF {
+		err = nil
+	}
+	if err != nil {
+		panic(err)
+	}
+
+	return bb.Bytes(), err
+}
