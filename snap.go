@@ -72,9 +72,6 @@ func (sf *SnappyFile) Write(p []byte) (n int, err error) {
 		const crc32Sz = 4
 		var tag32 uint32 = uint32(chunk_type) + (uint32(len(writeme)+crc32Sz) << 8)
 
-		//fmt.Printf("\n len(writeme) = %d  and in hex: %x\n", len(writeme), len(writeme))
-		//fmt.Printf("\n tag32 = %x\n", tag32)
-
 		err = binary.Write(sf.Filep, binary.LittleEndian, tag32)
 		if err != nil {
 			return

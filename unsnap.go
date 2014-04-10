@@ -244,9 +244,6 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 				nDec += n
 
 				// verify the crc32 rotated checksum
-				//  couldn't actually get this to match what we expected, because I wasn't checking the *decoded and uncompressed* version.
-				//  should be using the intel hardware and so be very fast.
-
 				m32 := masked_crc32c(dec)
 				if m32 != crc {
 					panic(fmt.Sprintf("crc32 masked failiure. expected: %v but got: %v", crc, m32))
@@ -428,8 +425,6 @@ func Unsnappy(r io.Reader, w io.Writer) (err error) {
 	return nil
 }
 
-// python's implementation, for reference.
-
 var SnappyStreamHeaderMagic = []byte{0xff, 0x06, 0x00, 0x00, 0x73, 0x4e, 0x61, 0x50, 0x70, 0x59}
 
 const CHUNK_MAX = 65536
@@ -459,101 +454,6 @@ func masked_crc32c(data []byte) uint32 {
 	var crc uint32 = crc32.Checksum(data, crctab)
 	return (uint32((crc>>15)|(crc<<17)) + 0xa282ead8)
 }
-
-/*
-class StreamDecompressor(object):
-
-    """This class implements the decompressor-side of the proposed Snappy
-    framing format, found at
-
-        http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt
-            ?spec=svn68&r=71
-
-    This class matches a subset of the interface found for the zlib module's
-    decompression objects (see zlib.decompressobj). Specifically, it currently
-    implements the decompress method without the max_length option, the flush
-    method without the length option, and the copy method.
-    """
-
-    __slots__ = ["_buf", "_header_found"]
-
-    def __init__(self):
-        self._buf = b""
-        self._header_found = False
-*/
-
-/*
-func Decompress(obuf *bytes.Buffer, data []byte, header_found bool) []byte {
-
-	//        """Decompress 'data', returning a string containing the uncompressed
-	//        data corresponding to at least part of the data in string. This data
-	//        should be concatenated to the output produced by any preceding calls to
-	//        the decompress() method. Some of the input data may be preserved in
-	//        internal buffers for later processing.
-	//        """
-
-	fourbytes := make([]byte, 4)
-	copy(obuf, data)
-	uncompressed := new(bytes.Buffer)
-	for {
-		if len(obuf) < 4 {
-			return uncompressed.Bytes()
-		}
-
-		chunk := obuf.Bytes()
-		fourbytes[3] = 0
-		copy(fourbytes, chunk[1:4])
-
-		chunksz := binary.LittleEndian.Uint32(fourbytes)
-		chunk_type := chunk[0]
-		size = (chunk_type >> 8)
-		chunk_type &= 0xff
-
-		if !header_found {
-			if chunk_type != _IDENTIFIER_CHUNK || size != len(_STREAM_IDENTIFIER) {
-				panic("stream missing snappy identifier")
-			}
-			header_found = true
-		}
-		if _RESERVED_UNSKIPPABLE0 <= chunk_type && chunk_type < _RESERVED_UNSKIPPABLE1 {
-			panic("stream received unskippable but unknown chunk")
-		}
-
-		if len(obuf) < 4+size {
-			return uncompressed.Bytes()
-		}
-
-		chunk, obuf = obuf[4:4+size], obuf[4+size:]
-		if chunk_type == _IDENTIFIER_CHUNK {
-			if chunk != _STREAM_IDENTIFIER {
-				panic("stream has invalid snappy identifier")
-			}
-			continue
-		}
-		if _RESERVED_SKIPPABLE0 <= chunk_type && chunk_type < _RESERVED_SKIPPABLE1 {
-			continue
-		}
-		if chunk_type != _COMPRESSED_CHUNK && chunk_type != _UNCOMPRESSED_CHUNK {
-			panic("bad chunk_type")
-		}
-		crc, chunk = chunk[:4], chunk[4:]
-		if chunk_type == _COMPRESSED_CHUNK {
-			chunk = _uncompress(chunk)
-
-			chunk, ok := snappy.Decode(nil, chunk)
-			if ok != nil {
-				panic("could not snappy.Decode chunk")
-			}
-
-		}
-		if masked_crc32c(chunk) != crc {
-			panic("crc mismatch")
-		}
-		uncompressed.append(chunk)
-
-	} // end for
-}
-*/
 
 func ReadSnappyStreamCompressedFile(filename string) ([]byte, error) {
 
