@@ -30,7 +30,7 @@ type SnappyFile struct {
 	// for writing to stream-framed snappy
 	HeaderChunkWritten bool
 
-	// Sanity check: ee can only read, or only write, to one SnappyFile.
+	// Sanity check: we can only read, or only write, to one SnappyFile.
 	// EncBuf and DecBuf are used differently in each mode. Verify
 	// that we are consistent with this flag.
 	Writing bool
