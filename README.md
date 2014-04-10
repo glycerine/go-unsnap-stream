@@ -10,4 +10,5 @@ Strangely, though the streaming format was first proposed in Go[1][2], it was ne
 For binary compatibility with python implementation, we call the C-snappy compressor/decompressor code directly; using github.com/dgryski/go-csnappy. The native Go implementation produces slightly different binary compression, making test-diffs harder, and some have complained about it being slower than the C.
 
 [1] https://groups.google.com/forum/#!msg/snappy-compression/qvLNe2cSH9s/R19oBC-p7g4J
+
 [2] https://codereview.appspot.com/5167058
