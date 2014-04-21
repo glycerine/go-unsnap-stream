@@ -126,6 +126,37 @@ func TestRingBufReadWrite(t *testing.T) {
 
 			by := b.Bytes()
 			cv.So(by, cv.ShouldResemble, data[4:9]) // but still get them back continguous from the ping-pong buffering
+
+		})
+
+		cv.Convey("FixedSizeRingBuf::GetEndmostWritableSlice() should return the slice size we expect.", func() {
+			b.Reset()
+			var bb bytes.Buffer
+			n, err := b.ReadFrom(&bb)
+			cv.So(n, cv.ShouldEqual, 0)
+			cv.So(err, cv.ShouldEqual, nil)
+			cv.So(len(b.GetEndmostWritableSlice()), cv.ShouldEqual, 5)
+
+			// write 4, then read 4 bytes
+			m, err := b.Write(data[0:4])
+			cv.So(m, cv.ShouldEqual, 4)
+			cv.So(err, cv.ShouldEqual, nil)
+			cv.So(len(b.GetEndmostWritableSlice()), cv.ShouldEqual, 1)
+
+			sink := make([]byte, 4)
+			k, err := b.Read(sink) // put b.beg at 4
+			cv.So(k, cv.ShouldEqual, 4)
+			cv.So(err, cv.ShouldEqual, nil)
+			cv.So(b.Readable, cv.ShouldEqual, 0)
+			cv.So(b.Beg, cv.ShouldEqual, 4)
+
+			bbread := bytes.NewBuffer(data[4:9])
+			n, err = b.ReadFrom(bbread) // wrap 4 bytes around to the front, 5 bytes total.
+
+			by := b.Bytes()
+			cv.So(by, cv.ShouldResemble, data[4:9]) // but still get them back continguous from the ping-pong buffering
+
+			cv.So(len(b.GetEndmostWritableSlice()), cv.ShouldEqual, 0)
 		})
 
 	})

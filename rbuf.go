@@ -42,6 +42,17 @@ type FixedSizeRingBuf struct {
 	N        int       // MaxViewInBytes, the size of A[0] and A[1] in bytes.
 	Beg      int       // start of data in A[Use]
 	Readable int       // number of bytes available to read in A[Use]
+
+	OneMade bool // lazily instantiate the [1] buffer. If we never call Bytes(),
+	// we may never need it. If OneMade is false, the Use must be = 0.
+}
+
+func (b *FixedSizeRingBuf) Make2ndBuffer() {
+	if b.OneMade {
+		return
+	}
+	b.A[1] = make([]byte, b.N, b.N)
+	b.OneMade = true
 }
 
 // get the length of the largest read that we can provide to a contiguous slice
@@ -61,9 +72,11 @@ func NewFixedSizeRingBuf(maxViewInBytes int) *FixedSizeRingBuf {
 		N:        n,
 		Beg:      0,
 		Readable: 0,
+		OneMade:  false,
 	}
 	r.A[0] = make([]byte, n, n)
-	r.A[1] = make([]byte, n, n)
+
+	// r.A[1] initialized lazily now.
 
 	return r
 }
@@ -83,6 +96,8 @@ func (b *FixedSizeRingBuf) Bytes() []byte {
 	}
 
 	// wrap into the other buffer
+	b.Make2ndBuffer()
+
 	src := b.Use
 	dest := 1 - b.Use
 
@@ -312,7 +327,7 @@ func (b *FixedSizeRingBuf) Adopt(me []byte) {
 	n := len(me)
 	if n > b.N {
 		b.A[0] = me
-		b.A[1] = make([]byte, n, n)
+		b.OneMade = false
 		b.N = n
 		b.Use = 0
 		b.Beg = 0

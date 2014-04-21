@@ -10,8 +10,21 @@ import (
 
 	"hash/crc32"
 
-	// use the C wrapper instead of "code.google.com/p/snappy-go/snappy"
-	snappy "github.com/dgryski/go-csnappy"
+	"code.google.com/p/snappy-go/snappy"
+
+	// The C library can be used, but this makes the binary dependent
+	// lots of extraneous c-libraries; it is no longer stand-alone. Yuck.
+	//
+	// Therefore we comment out the "dgryski/go-csnappy" path and use the
+	// "code.google.com/p/snappy-go/snappy" above instead. If you are
+	// performance limited and can deal with distributing more libraries,
+	// then this is easy to swap.
+	//
+	// If you swap, note that some of the tests won't pass
+	// because snappy-go produces slightly different (but still
+	// conformant) encodings on some data. Here are bindings
+	// to the C-snappy:
+	// snappy "github.com/dgryski/go-csnappy"
 )
 
 // SnappyFile: create a drop-in-replacement/wrapper for an *os.File that handles doing the unsnappification online as more is read from it
