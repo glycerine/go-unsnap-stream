@@ -10,7 +10,7 @@ import (
 
 func main() {
 
-	if len(os.Args) > 0 && os.Args[1] == "--help" {
+	if len(os.Args) > 1 && os.Args[1] == "--help" {
 		fmt.Fprintf(os.Stderr, "unsnap: decode from stdin the snappy-framing-format[1][2] that wraps snappy[3] compressed chunks of data. Writes to stdout.\n   [1]https://github.com/glycerine/go-unsnap-stream\n   [2]http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt\n   [3]http://code.google.com/p/snappy\n")
 		os.Exit(1)
 	}
