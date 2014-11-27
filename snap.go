@@ -3,8 +3,11 @@ package unsnap
 import (
 	"encoding/binary"
 
-	// use the C wrapper instead of "code.google.com/p/snappy-go/snappy"
-	snappy "github.com/dgryski/go-csnappy"
+	// no c lib dependency
+	snappy "code.google.com/p/snappy-go/snappy"
+
+	// or, use the C wrapper for speed
+	//snappy "github.com/dgryski/go-csnappy"
 )
 
 // add Write() method for SnappyFile (see unsnap.go)
