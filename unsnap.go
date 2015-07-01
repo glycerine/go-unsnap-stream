@@ -10,13 +10,13 @@ import (
 
 	"hash/crc32"
 
-	"code.google.com/p/snappy-go/snappy"
+	snappy "github.com/golang/snappy/snappy"
 
 	// The C library can be used, but this makes the binary dependent
 	// lots of extraneous c-libraries; it is no longer stand-alone. Yuck.
 	//
 	// Therefore we comment out the "dgryski/go-csnappy" path and use the
-	// "code.google.com/p/snappy-go/snappy" above instead. If you are
+	// "github.com/golang/snappy/snappy" above instead. If you are
 	// performance limited and can deal with distributing more libraries,
 	// then this is easy to swap.
 	//

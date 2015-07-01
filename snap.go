@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 
 	// no c lib dependency
-	snappy "code.google.com/p/snappy-go/snappy"
+	snappy "github.com/golang/snappy/snappy"
 
 	// or, use the C wrapper for speed
 	//snappy "github.com/dgryski/go-csnappy"
