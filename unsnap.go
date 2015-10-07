@@ -10,7 +10,7 @@ import (
 
 	"hash/crc32"
 
-	snappy "github.com/golang/snappy/snappy"
+	snappy "github.com/golang/snappy"
 
 	// The C library can be used, but this makes the binary dependent
 	// lots of extraneous c-libraries; it is no longer stand-alone. Yuck.

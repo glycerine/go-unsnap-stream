@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 
 	// no c lib dependency
-	snappy "github.com/golang/snappy/snappy"
+	snappy "github.com/golang/snappy"
 
 	// or, use the C wrapper for speed
 	//snappy "github.com/dgryski/go-csnappy"
@@ -59,10 +59,7 @@ func (sf *SnappyFile) Write(p []byte) (n int, err error) {
 
 		// first write to EncBuf, as a temp, in case we want
 		// to discard and send uncompressed instead.
-		compressed_chunk, ok := snappy.Encode(sf.EncBuf.GetEndmostWritableSlice(), chunk)
-		if ok != nil {
-			panic("problem duing snappy.Encode()")
-		}
+		compressed_chunk := snappy.Encode(sf.EncBuf.GetEndmostWritableSlice(), chunk)
 
 		if len(compressed_chunk) <= int((1-_COMPRESSION_THRESHOLD)*float64(len(chunk))) {
 			writeme = compressed_chunk
