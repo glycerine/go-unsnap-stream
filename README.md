@@ -1,7 +1,7 @@
 go-unsnap-stream
 ================
 
-This is a small golang library for decoding and encoding the snappy *streaming* format, specified here: http://code.google.com/p/snappy/source/browse/trunk/framing_format.txt
+This is a small golang library for decoding and encoding the snappy *streaming* format, specified here: https://github.com/google/snappy/blob/master/framing_format.txt
 
 Note that the *streaming or framing format* for snappy is different from snappy itself. Think of it as a train of boxcars: the streaming format breaks your data in chunks, applies snappy to each chunk alone, then puts a thin wrapper around the chunk, and sends it along in turn. You can begin decoding before receiving everything. And memory requirements for decoding are sane.
 
