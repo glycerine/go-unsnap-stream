@@ -17,7 +17,7 @@ func main() {
 
 	snap := &unsnap.SnappyFile{
 		Fname:   "stdin",
-		Filep:   os.Stdin,
+		Reader:  os.Stdin,
 		EncBuf:  *unsnap.NewFixedSizeRingBuf(unsnap.CHUNK_MAX * 2), // buffer of snappy encoded bytes
 		DecBuf:  *unsnap.NewFixedSizeRingBuf(unsnap.CHUNK_MAX * 2), // buffer of snapppy decoded bytes
 		Writing: false,

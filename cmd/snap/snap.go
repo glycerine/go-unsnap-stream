@@ -17,7 +17,7 @@ func main() {
 
 	snap := &unsnap.SnappyFile{
 		Fname:   "stdout",
-		Filep:   os.Stdout,
+		Writer:  os.Stdout,
 		EncBuf:  *unsnap.NewFixedSizeRingBuf(unsnap.CHUNK_MAX * 2), // on writing: temp for testing compression
 		DecBuf:  *unsnap.NewFixedSizeRingBuf(unsnap.CHUNK_MAX * 2), // on writing: final buffer of snappy framed and encoded bytes
 		Writing: true,

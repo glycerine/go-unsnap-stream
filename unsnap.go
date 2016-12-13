@@ -11,7 +11,6 @@ import (
 	"hash/crc32"
 
 	snappy "github.com/golang/snappy"
-
 	// The C library can be used, but this makes the binary dependent
 	// lots of extraneous c-libraries; it is no longer stand-alone. Yuck.
 	//
@@ -31,7 +30,9 @@ import (
 
 type SnappyFile struct {
 	Fname string
-	Filep *os.File
+
+	Reader io.Reader
+	Writer io.Writer
 
 	// allow clients to substitute us for an os.File and just switch
 	// off compression if they don't want it.
@@ -60,7 +61,7 @@ func (f *SnappyFile) Dump() {
 func (f *SnappyFile) Read(p []byte) (n int, err error) {
 
 	if f.SnappyEncodeDecodeOff {
-		return f.Filep.Read(p)
+		return f.Reader.Read(p)
 	}
 
 	if f.Writing {
@@ -75,7 +76,7 @@ func (f *SnappyFile) Read(p []byte) (n int, err error) {
 	}
 
 	//nEncRead, nDecAdded, err := UnsnapOneFrame(f.Filep, &f.EncBuf, &f.DecBuf, f.Fname)
-	_, _, err = UnsnapOneFrame(f.Filep, &f.EncBuf, &f.DecBuf, f.Fname)
+	_, _, err = UnsnapOneFrame(f.Reader, &f.EncBuf, &f.DecBuf, f.Fname)
 	if err != nil && err != io.EOF {
 		panic(err)
 	}
@@ -104,14 +105,27 @@ func Open(name string) (file *SnappyFile, err error) {
 	// encoding in snappy can apparently go beyond the original size, so
 	// we make our buffers big enough, 2*max snappy chunk => 2 * CHUNK_MAX(65536)
 
-	snap := &SnappyFile{
-		Fname:   name,
-		Filep:   fp,
+	snap := NewReader(fp)
+	snap.Fname = name
+	return snap, nil
+}
+
+func NewReader(r io.Reader) *SnappyFile {
+	return &SnappyFile{
+		Reader:  r,
 		EncBuf:  *NewFixedSizeRingBuf(CHUNK_MAX * 2), // buffer of snappy encoded bytes
 		DecBuf:  *NewFixedSizeRingBuf(CHUNK_MAX * 2), // buffer of snapppy decoded bytes
 		Writing: false,
 	}
-	return snap, nil
+}
+
+func NewWriter(w io.Writer) *SnappyFile {
+	return &SnappyFile{
+		Writer:  w,
+		EncBuf:  *NewFixedSizeRingBuf(65536),     // on writing: temp for testing compression
+		DecBuf:  *NewFixedSizeRingBuf(65536 * 2), // on writing: final buffer of snappy framed and encoded bytes
+		Writing: true,
+	}
 }
 
 func Create(name string) (file *SnappyFile, err error) {
@@ -119,22 +133,32 @@ func Create(name string) (file *SnappyFile, err error) {
 	if err != nil {
 		return nil, err
 	}
-	snap := &SnappyFile{
-		Fname:   name,
-		Filep:   fp,
-		EncBuf:  *NewFixedSizeRingBuf(65536),     // on writing: temp for testing compression
-		DecBuf:  *NewFixedSizeRingBuf(65536 * 2), // on writing: final buffer of snappy framed and encoded bytes
-		Writing: true,
-	}
+	snap := NewWriter(fp)
+	snap.Fname = name
 	return snap, nil
 }
 
 func (f *SnappyFile) Close() error {
-	return f.Filep.Close()
+	if f.Writing {
+		wc, ok := f.Writer.(io.WriteCloser)
+		if ok {
+			return wc.Close()
+		}
+		return nil
+	}
+	rc, ok := f.Reader.(io.ReadCloser)
+	if ok {
+		return rc.Close()
+	}
+	return nil
 }
 
 func (f *SnappyFile) Sync() error {
-	return f.Filep.Sync()
+	file, ok := f.Writer.(*os.File)
+	if ok {
+		return file.Sync()
+	}
+	return nil
 }
 
 // for an increment of a frame at a time:

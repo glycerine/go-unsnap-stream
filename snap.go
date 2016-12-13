@@ -5,7 +5,6 @@ import (
 
 	// no c lib dependency
 	snappy "github.com/golang/snappy"
-
 	// or, use the C wrapper for speed
 	//snappy "github.com/dgryski/go-csnappy"
 )
@@ -25,7 +24,7 @@ import (
 func (sf *SnappyFile) Write(p []byte) (n int, err error) {
 
 	if sf.SnappyEncodeDecodeOff {
-		return sf.Filep.Write(p)
+		return sf.Writer.Write(p)
 	}
 
 	if !sf.Writing {
@@ -40,7 +39,7 @@ func (sf *SnappyFile) Write(p []byte) (n int, err error) {
 
 	if !sf.HeaderChunkWritten {
 		sf.HeaderChunkWritten = true
-		_, err = sf.Filep.Write(SnappyStreamHeaderMagic)
+		_, err = sf.Writer.Write(SnappyStreamHeaderMagic)
 		if err != nil {
 			return
 		}
@@ -72,17 +71,17 @@ func (sf *SnappyFile) Write(p []byte) (n int, err error) {
 		const crc32Sz = 4
 		var tag32 uint32 = uint32(chunk_type) + (uint32(len(writeme)+crc32Sz) << 8)
 
-		err = binary.Write(sf.Filep, binary.LittleEndian, tag32)
+		err = binary.Write(sf.Writer, binary.LittleEndian, tag32)
 		if err != nil {
 			return
 		}
 
-		err = binary.Write(sf.Filep, binary.LittleEndian, crc)
+		err = binary.Write(sf.Writer, binary.LittleEndian, crc)
 		if err != nil {
 			return
 		}
 
-		_, err = sf.Filep.Write(writeme)
+		_, err = sf.Writer.Write(writeme)
 		if err != nil {
 			return
 		}
