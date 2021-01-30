@@ -336,7 +336,8 @@ func UnsnapOneFrame(r io.Reader, encBuf *FixedSizeRingBuf, outDecodedBuf *FixedS
 			}
 
 		default:
-			panic(fmt.Sprintf("unrecognized/unsupported chunk type %#v", chunk_type))
+			err = fmt.Errorf("unrecognized/unsupported chunk type %#v; on fname='%v'", chunk_type, fname)
+			return nEnc, nDec, err
 		}
 
 	} // end for{}
